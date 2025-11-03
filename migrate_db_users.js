@@ -1,19 +1,15 @@
 import express from 'express'
 import cors from 'cors'
-import { Sequelize } from 'sequelize'
 import axios from 'axios'
+import { conn } from './config/db.js'
 
 const app = express()
 app.use(cors())
 
 const port = 3501
 
-const sequelize = new Sequelize('service_portal', 'paullaster', 'paullaster', {
-    host: 'localhost',
-    dialect: 'mysql',
-})
 try {
-    sequelize.authenticate()
+    conn.authenticate()
     console.log('Connection has been established successfully.')
 } catch (error) {
     console.error('Unable to connect to the database:', error)

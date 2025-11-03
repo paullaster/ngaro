@@ -1,9 +1,10 @@
 {
   "name": "scripts",
   "version": "1.0.0",
-  "main": "migrate_db_users.js",
+  "main": "server.js",
+  "type": "module",
   "scripts": {
-    "start": "node migrate_db_users.js",
+    "start": "node --watch --env-file=./.env server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -15,6 +16,7 @@
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "mysql2": "^3.12.0",
-    "sequelize": "^6.37.5"
+    "sequelize": "^6.37.5",
+    "tunnel-ssh": "^5.2.0"
   }
 }

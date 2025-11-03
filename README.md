@@ -39,7 +39,8 @@ Set the following environment variables for the destination database:
 - `DEST_DB_HOST`: Database host
 - `DEST_DB_PORT`: Database port
 - `DEST_DB_DIALECT`: Database dialect (e.g., mysql, postgres)
-  NOTE: You can extend this .env and create as many database configs as you wish since the db configs are passed and dynamically
+
+NOTE: You can extend this .env and create as many database configs as you wish since the db configs are passed and dynamically
 
 ## Usage
 

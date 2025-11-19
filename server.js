@@ -3,7 +3,11 @@ import cors from 'cors'
 import axios from 'axios'
 import { conn } from './config/db.js'
 import { readFile } from 'node:fs/promises'
-import { createTunnel } from 'tunnel-ssh'
+import { DBToDBTransfer } from './interface/controllers/database-to-database.js'
+import { getDBConnection } from './interface/utils/database/get-database-connection.js'
+import { DataTransfer } from './interface/controllers/data-transfer.js'
+import { transport } from '@brainspore/hypernexus'
+import { formatToMySQLDateTime } from './interface/utils/database/mysql-datetime-formartter.js'
 
 const app = express()
 app.use(cors())
@@ -11,6 +15,9 @@ app.use(cors())
 const port = 3501
 
 
+const newDbToDbTransfer = new DBToDBTransfer(getDBConnection);
+
+const newDataTransfer = new DataTransfer(getDBConnection);
 
 const sshConfig = async (credential = null, authType = 'password', passphrase = null, conf = {
     tunnelOptions: {
@@ -47,101 +54,41 @@ const sshConfig = async (credential = null, authType = 'password', passphrase = 
     }
     return conf;
 };
-const sshConf = await sshConfig(process.env.SSH_HOST_REMOTE_CREDENTIAL);
-const tunnel = await createTunnel(sshConf.tunnelOptions, sshConf.serverOptions, sshConf.sshOptions, sshConf.forwardOptions);
-console.log('tunnel connection established: ');
 
-const getDBConnection = (connector, connectorType = 'sequelize', config = null, name = 'source') => {
-    let conn = null;
-    const c = (connectorType || '').toLowerCase();
-    switch (c) {
-        case 'sequelize': {
-            if (config) {
-                const { type, ...conf } = config;
-                conn = connector(type, conf);
-            } else {
-                conn = connector();
-            }
-            try {
-                if (!conn) {
-                    console.error(`Unable to connect to the [${(name || '').toLocaleUpperCase()}]database:`)
-                    process.exit(1)
-                }
-                conn.authenticate()
-                console.log(`Connection to [${(name || '').toLocaleUpperCase()}] database has been established successfully.`)
-            } catch (error) {
-                console.error(`Unable to connect to the [${(name || '').toLocaleUpperCase()}] database:`, error)
-                process.exit(1)
-            }
-        }
-    }
-    return conn;
-}
-
-
-// console.log(users)
-const formatToMySQLDateTime = (date) => {
-    if (!date) return null;
-    const d = new Date(date);
-    return d.toISOString().slice(0, 19).replace('T', ' ');
-};
-
-
-const getDataFromSource = async (connectionQueryInterface, table, connectionType = 'mysql') => {
-    // get data
-    const db = connectionQueryInterface;
-    let data = await db.select(null, table);
-
-    // Get table column definitions to identify datetime columns
-    const tableDescription = await db.describeTable(table);
-
-    // Get DATETIME columns
-    const datetimeColumns = Object.keys(tableDescription).filter(
-        col => ['DATETIME', 'TIMESTAMP'].includes(tableDescription[col].type)
-    );
-
-    if (connectionType === 'mysql') {
-        // Process for mysql DATETIME and TIMESTAMP columns
-        const processedUsers = data.map(d => {
-            const newUser = { ...d };
-            for (const col of datetimeColumns) {
-                if (newUser[col]) {
-                    newUser[col] = formatToMySQLDateTime(newUser[col]);
-                }
-            };
-            return newUser;
-        });
-        data = processedUsers;
-    }
-    return data;
-}
-
-const destinationDatabase = async (connectionQueryInterface, table, data, ignoreDuplicates = true, updateOnDuplicate = []) => {
-    const db = connectionQueryInterface;
-    const res = await db.bulkInsert(table, data, {
-        ignoreDuplicates,
-        updateOnDuplicate,
-    });
-    return res;
-}
-const source = getDBConnection(conn);
-const dataSource = await getDataFromSource(source.getQueryInterface(), 'users');
-
-// Destination DB:
 const destDBConfig = {
     type: 'params',
-    database: process.env.DEST_DB_USERNAME,
-    username: process.env.DEST_DB_DATABASE,
+    database: process.env.DEST_DB_DATABASE,
+    username: process.env.DEST_DB_USERNAME,
     password: process.env.DEST_DB_PASSWORD,
     host: process.env.DEST_DB_HOST,
     port: process.env.DEST_DB_PORT,
     dialect: process.env.DEST_DB_DIALECT,
 };
 
-const destDBConnection = getDBConnection(conn, 'sequelize', destDBConfig, 'destination');
 
-const data = dataSource.map((d) => {
-    return {
+
+// const laravelInsertFormat = processedUsers.map(user => ({
+//     ...user,
+//     // Add created_at/updated_at if needed
+//     created_at: formatToMySQLDateTime(new Date()),
+//     updated_at: formatToMySQLDateTime(new Date())
+// }));
+// console.log(laravelInsertFormat)
+
+// const response = await axios.post(
+//     'http://44.220.0.33:8001/api/v1/insert/settings',
+//     laravelInsertFormat,
+//     {
+//         headers: {
+//             'Content-Type': 'application/json',
+//         },
+//     }
+// )
+// console.log("server response: ", response)
+
+const options = {
+    sourceTable: 'users',
+    fieldsMapper: (data) => data.map((d) => ({
         name: d.name,
         email: d.email,
         email_verified_at: d.email_verified_at,
@@ -171,59 +118,149 @@ const data = dataSource.map((d) => {
         created_at: d.created_at,
         updated_at: d.updated_at,
         default_company: d.default_company
-    }
-});
-const fields = [
-    "name",
-    "email",
-    "email_verified_at",
-    "password",
-    "activated",
-    "phoneNo",
-    "no",
-    "address",
-    "searchName",
-    "name2",
-    "address2",
-    "city",
-    "contact",
-    "telexNo",
-    "b64Image",
-    "avatar",
-    "homePage",
-    "county",
-    "postCode",
-    "vatRegistrationNo",
-    "balanceLCY",
-    "balance",
-    "priority",
-    "blocked",
-    "type",
-    "remember_token",
-    "created_at",
-    "updated_at",
-    "default_company"
-];
-const insertedRecords = await destinationDatabase(destDBConnection.getQueryInterface(), 'users', data, false, fields);
-console.log('inserted data: ', insertedRecords);
+    })),
+    destTable: 'user',
+    destFieldToUpdateOnDuplicate: [
+        "name",
+        "email",
+        "email_verified_at",
+        "password",
+        "activated",
+        "phoneNo",
+        "no",
+        "address",
+        "searchName",
+        "name2",
+        "address2",
+        "city",
+        "contact",
+        "telexNo",
+        "b64Image",
+        "avatar",
+        "homePage",
+        "county",
+        "postCode",
+        "vatRegistrationNo",
+        "balanceLCY",
+        "balance",
+        "priority",
+        "blocked",
+        "type",
+        "remember_token",
+        "created_at",
+        "updated_at",
+        "default_company"
+    ],
+    destDBConnector: conn,
+    srcDBConnector: conn,
 
+}
 
-// const laravelInsertFormat = processedUsers.map(user => ({
-//     ...user,
-//     // Add created_at/updated_at if needed
-//     created_at: formatToMySQLDateTime(new Date()),
-//     updated_at: formatToMySQLDateTime(new Date())
-// }));
-// console.log(laravelInsertFormat)
+// console.log('inserted data', await newDbToDbTransfer.overSimilarSshSession(sshConfig, null, destDBConfig, options))
+const d_pass = '$2y$10$mMSbPcB9xKn8AZX/pGBQL.dVyQXtfmPf5Chgz4zlSJieLmS577sZu';
 
-// const response = await axios.post(
-//     'http://44.220.0.33:8001/api/v1/insert/settings',
-//     laravelInsertFormat,
-//     {
-//         headers: {
-//             'Content-Type': 'application/json',
-//         },
-//     }
-// )
-// console.log("server response: ", response)
+await newDataTransfer.fromBCAPIToDB(destDBConfig, {
+    db: {
+        connector: conn,
+        tables: [
+            {
+                name: 'users',
+                prepareData: (data) => {
+                    return data.map((d) => {
+                        if (d.userApplicationRequest[0]) {
+                            return {
+                                name: `${d.FirstName} ${d.SecondName} ${d.LastName}`,
+                                id_number: d.IdentificationDocumentNo,
+                                email: d.Email,
+                                type: d.type ?? 'Individual',
+                                application_type: d.userApplicationRequest[0].Applied_Category,
+                                password: d_pass,
+                                admin: 0,
+                                profile_status: 'new',
+                                created_at: formatToMySQLDateTime(d.userApplicationRequest[0].Application_DateTime),
+                                updated_at: formatToMySQLDateTime(d.userApplicationRequest[0].Application_DateTime),
+                                is_admin: 0,
+                                showRelease: 0,
+                                synched: 0,
+                                phone_number: d.PhoneNo,
+                                ProfileID: d.ProfileID,
+                            }
+                        }
+                    }).filter((f) => f && f)
+                }
+            },
+            {
+                name: 'profiles',
+                prepareData: (data) => {
+                    return data.map((d) => {
+                        if (d.userApplicationRequest[0]) {
+                            return {
+                                ProfileID: d.ProfileID,
+                                user_id: Math.floor(Math.random() * 1000000),
+                                FirstName: `${d.FirstName}`,
+                                SecondName: `${d.SecondName}`,
+                                LastName: `${d.LastName}`,
+                                SearchName: d.SearchName,
+                                DateOfBirth: d.DateOfBirth,
+                                Email: d.Email,
+                                PhoneNo: d.PhoneNo,
+                                Nationality: d.Nationality,
+                                IdentificationDocumentNo: d.IdentificationDocumentNo,
+                                Gender: d.Gender,
+                                MaritalStatus: d.MaritalStatus,
+                                MemberShipType: d.userApplicationRequest[0].Applied_Category,
+                                City: d.City,
+                                Address: d.Address,
+                                WebSite: d.WebSite,
+                                countryCode: d.countryCode,
+                                ApplicationPurpose: d.ApplicationPurpose,
+                                intendToWorkLocally: 0,
+                                ProfileComplete: 0,
+                                Synched: 0,
+                                created_at: formatToMySQLDateTime(d.userApplicationRequest[0].Application_DateTime),
+                                updated_at: formatToMySQLDateTime(d.userApplicationRequest[0].Application_DateTime),
+                                InGoodStanding: d.InGoodStanding,
+                                regionCode: d.regionCode,
+                                branchCode: d.branchCode
+                            }
+                        }
+                    }).filter((f) => f && f)
+                }
+            },
+            {
+                name: 'application_requests',
+                prepareData: (data) => {
+                    return data.map((d) => {
+                        if (d.userApplicationRequest[0]) {
+                            return {
+                                created_at: formatToMySQLDateTime(d.userApplicationRequest[0].Application_DateTime),
+                                updated_at: formatToMySQLDateTime(d.userApplicationRequest[0].Application_DateTime),
+                                ProfileID: d.ProfileID,
+                                Code: d.userApplicationRequest[0].Code,
+                                Amount: d.userApplicationRequest[0].Amount,
+                                AppliedCategory: d.userApplicationRequest[0].Applied_Category,
+                                ApplicationDateTime: formatToMySQLDateTime(d.userApplicationRequest[0].Application_DateTime),
+                                SubscriptionPeriod: d.Subscription_Period,
+                                Synched: 0,
+                            }
+                        }
+                    }).filter((f) => f && f)
+                }
+            }
+        ]
+    },
+    bc: {
+        endpoint: '/api/KineticTechnology/Membership/v2.0/userProfile',
+        query: {
+            '$filter': "status eq 'New' and type eq 'Individual'",
+            '$expand': 'userApplicationRequest',
+        },
+        transportOptions: {
+            headers: {
+                Prefer: "maxpagesize=10"
+            }
+        }
+    },
+}, transport);
+
 app.listen(port)

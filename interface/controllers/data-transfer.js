@@ -1,12 +1,20 @@
+import { createTunnel } from "tunnel-ssh";
 import { insertRecords } from "../utils/database/insert-into-destination-db.js";
+import { createSSHTunnel } from "../utils/ssh/create-ssh-tunnel.js";
 
 export class DataTransfer {
     constructor(dbConnectionDI) {
         this.dbConnectionDI = dbConnectionDI;
     }
 
-    async fromBCAPIToDB(dbConfig, options, transportUtil, transportUtilType = 'hypernexus') {
+    async fromBCAPIToDB(dbConfig, options, transportUtil, transportUtilType = 'hypernexus', overSSH = false, sshConfig = async () => ({})) {
         try {
+            if (overSSH) {
+                const sshConf = await sshConfig(process.env.SSH_HOST_REMOTE_CREDENTIAL, 'privatekey', process.env.SSH_CREDENTIAL_PASSPHRASE);
+                const tunnel = await createTunnel(sshConf.tunnelOptions, sshConf.serverOptions, sshConf.sshOptions, sshConf.forwardOptions);
+                console.log('tunnel connection established: ');
+                // createSSHTunnel(sshConfig, 'privatekey', process.env.SSH_CREDENTIAL_PASSPHRASE);
+            }
             if (!dbConfig || !options.db.tables) throw new Error('Missing destination database configurations');
             let response;
             const tType = transportUtilType?.toUpperCase();
@@ -24,6 +32,7 @@ export class DataTransfer {
                     options.db.tables.map((t) => insertRecords(dbConn.getQueryInterface(), t.name, t.prepareData(response.value))),
                 );
 
+                await dbConn.close();
             }
             const nextLink = response['@odata.nextLink'];
             console.log(nextLink);
@@ -34,7 +43,7 @@ export class DataTransfer {
                     searchParams[key] = value;
                 }
                 options.bc.query = searchParams;
-                setTimeout(async () => await this.fromBCAPIToDB(dbConfig, options, transportUtil, transportUtilType), 3000);
+                setTimeout(async () => await this.fromBCAPIToDB(dbConfig, options, transportUtil, transportUtilType, overSSH, sshConfig), 3000);
 
             }
 

@@ -1,6 +1,6 @@
 import { formatToMySQLDateTime } from "./mysql-datetime-formartter.js";
 
-export const getDataFromSource = async (connectionQueryInterface, table, connectionType = 'mysql') => {
+export const getDataFromSource = async (connectionQueryInterface, table, connectionType = 'mysql', query = null) => {
     // get data
     const db = connectionQueryInterface;
     let data = await db.select(null, table);

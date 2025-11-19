@@ -25,6 +25,7 @@ export const conn = (connectionType = 'params', config = {
                     host: config.host,
                     port: config.port,
                     dialect: config.dialect,
+                    ...config.options,
                 }
             );
         }
